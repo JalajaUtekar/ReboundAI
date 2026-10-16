@@ -176,3 +176,32 @@ def test_aggregate_pct_matches_component_formula():
     instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=rng)
     expected = round((instance["th_score"] + instance["ete_score"] + instance["pr_tw_score"]) / 125 * 100, 1)
     assert instance["aggregate_pct"] == expected
+
+
+from scripts.data_generation.generator import generate_dataset
+
+
+def test_generate_dataset_produces_75_students_with_6_subjects_each():
+    dataset = generate_dataset(num_students=75, seed=42)
+    assert len(dataset) == 75
+    assert all(len(student["subjects"]) == 6 for student in dataset)
+
+
+def test_generate_dataset_is_reproducible_for_a_fixed_seed():
+    first = generate_dataset(num_students=75, seed=42)
+    second = generate_dataset(num_students=75, seed=42)
+    assert first == second
+
+
+def test_generate_dataset_at_risk_student_rate_is_within_5_to_15_percent():
+    dataset = generate_dataset(num_students=75, seed=42)
+    at_risk_students = [s for s in dataset if any(subj["at_risk"] for subj in s["subjects"])]
+    rate = len(at_risk_students) / len(dataset)
+    assert 0.05 <= rate <= 0.15
+
+
+def test_generate_dataset_at_risk_students_have_exactly_one_flagged_subject():
+    dataset = generate_dataset(num_students=75, seed=42)
+    for student in dataset:
+        flagged = [subj for subj in student["subjects"] if subj["at_risk"]]
+        assert len(flagged) in (0, 1), student["student_id"]

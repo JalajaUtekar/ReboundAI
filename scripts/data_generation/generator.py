@@ -220,3 +220,27 @@ def generate_subject_instance_with_target_label(
         f"Could not generate a '{subject['subject_slug']}' instance with at_risk={target_at_risk} "
         f"after {max_attempts} attempts"
     )
+
+
+def generate_dataset(num_students: int = 75, seed: int = 42) -> List[Dict]:
+    """Generates the full synthetic TY Computer Engineering cohort, deterministic for a given seed."""
+    rng = random.Random(seed)
+
+    roster = generate_roster(num_students, rng)
+    student_ids = [s["student_id"] for s in roster]
+    at_risk_ids = set(select_at_risk_students(student_ids, rng))
+
+    dataset = []
+    for student in roster:
+        subject_specs = assign_subjects(rng)
+        is_at_risk_student = student["student_id"] in at_risk_ids
+        flagged_index = rng.randrange(len(subject_specs)) if is_at_risk_student else None
+
+        subjects = []
+        for idx, subject in enumerate(subject_specs):
+            target_at_risk = is_at_risk_student and idx == flagged_index
+            subjects.append(generate_subject_instance_with_target_label(subject, target_at_risk, rng))
+
+        dataset.append({**student, "subjects": subjects})
+
+    return dataset
