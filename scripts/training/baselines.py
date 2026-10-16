@@ -108,15 +108,24 @@ def train_and_predict_oof_logreg(
     rows: List[dict],
     folds: List[tuple],
     feature_names: Optional[List[str]] = None,
+    C: float = 1.0,
+    oversample_target_ratio: float = 1.0,
 ) -> Dict[str, list]:
     """Train/predict LogisticRegression under the grouped-CV OOF protocol.
 
     Per fold: oversample train rows (cv.oversample_training_rows), fit a
     fresh StandardScaler on those (oversampled) train rows, transform both
     train and val rows with it, then fit
-    `LogisticRegression(class_weight='balanced', penalty='l2',
+    `LogisticRegression(C=C, class_weight='balanced', penalty='l2',
     max_iter=1000)` on the scaled train rows and predict probabilities on
     the scaled val rows.
+
+    `C` (inverse regularization strength, default 1.0 - scikit-learn's own
+    default, so existing callers are unaffected) and
+    `oversample_target_ratio` (forwarded as `target_ratio` to
+    `oversample_training_rows`, default 1.0 - that function's own default)
+    are optional tuning knobs added for scripts/training/tune_logreg.py;
+    neither changes behavior for callers that don't pass them.
 
     Returns parallel lists under keys "student_id", "subject_slug",
     "checkpoint_idx", "y_true", "y_proba" - one entry per row across all
@@ -132,7 +141,9 @@ def train_and_predict_oof_logreg(
         if not val_rows:
             continue
 
-        oversampled_train_rows = oversample_training_rows(train_rows)
+        oversampled_train_rows = oversample_training_rows(
+            train_rows, target_ratio=oversample_target_ratio
+        )
 
         X_train = _features_matrix(oversampled_train_rows, names)
         y_train = _labels_array(oversampled_train_rows)
@@ -143,7 +154,7 @@ def train_and_predict_oof_logreg(
         X_val_scaled = scaler.transform(X_val)
 
         model = LogisticRegression(
-            class_weight="balanced", penalty="l2", max_iter=1000
+            C=C, class_weight="balanced", penalty="l2", max_iter=1000
         )
         model.fit(X_train_scaled, y_train)
 
@@ -157,6 +168,12 @@ def train_and_predict_oof_gbdt(
     rows: List[dict],
     folds: List[tuple],
     feature_names: Optional[List[str]] = None,
+    max_depth: Optional[int] = 3,
+    min_samples_leaf: int = 5,
+    learning_rate: float = 0.1,
+    l2_regularization: float = 0.0,
+    max_iter: int = 100,
+    oversample_target_ratio: float = 1.0,
 ) -> Dict[str, list]:
     """Train/predict HistGradientBoostingClassifier under the grouped-CV
     OOF protocol.
@@ -166,6 +183,17 @@ def train_and_predict_oof_gbdt(
     min_samples_leaf=5, random_state=42)` on the (oversampled) train rows
     and predicts on the val rows directly - no feature standardization,
     since tree splits are invariant to monotonic per-feature rescaling.
+
+    `max_depth`, `min_samples_leaf`, `learning_rate`, `l2_regularization`,
+    and `max_iter` are optional tuning knobs forwarded straight to
+    `HistGradientBoostingClassifier`, added for
+    scripts/training/tune_gbdt.py; their defaults match the previous
+    hardcoded values (`learning_rate`, `l2_regularization`, and `max_iter`
+    match scikit-learn's own HistGradientBoostingClassifier defaults), so
+    existing callers that don't pass them are unaffected.
+    `oversample_target_ratio` is forwarded as `target_ratio` to
+    `oversample_training_rows` (default 1.0 - that function's own
+    default), same as the LogisticRegression variant.
     """
     names = feature_names if feature_names is not None else DEFAULT_FEATURE_NAMES
     result = _empty_oof_result()
@@ -176,7 +204,9 @@ def train_and_predict_oof_gbdt(
         if not val_rows:
             continue
 
-        oversampled_train_rows = oversample_training_rows(train_rows)
+        oversampled_train_rows = oversample_training_rows(
+            train_rows, target_ratio=oversample_target_ratio
+        )
 
         X_train = _features_matrix(oversampled_train_rows, names)
         y_train = _labels_array(oversampled_train_rows)
@@ -184,8 +214,11 @@ def train_and_predict_oof_gbdt(
 
         model = HistGradientBoostingClassifier(
             class_weight="balanced",
-            max_depth=3,
-            min_samples_leaf=5,
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+            learning_rate=learning_rate,
+            l2_regularization=l2_regularization,
+            max_iter=max_iter,
             random_state=42,
         )
         model.fit(X_train, y_train)
