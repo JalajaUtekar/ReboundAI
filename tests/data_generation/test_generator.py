@@ -100,3 +100,60 @@ def test_stable_series_stays_near_level():
     rng = random.Random(2)
     series = stable_series(level=82.0, n=10, noise=0.0, rng=rng)
     assert all(v == 82.0 for v in series)
+
+
+from scripts.data_generation.generator import (
+    generate_subject_instance,
+    generate_subject_instance_with_target_label,
+)
+
+_SAMPLE_SUBJECT = {
+    "subject_slug": "DSML",
+    "subject_name": "Data Science and Machine Learning",
+    "components": {"TH": 40, "ETE": 60, "PR": 25},
+}
+
+
+def test_generate_subject_instance_has_two_unit_tests_and_five_submissions():
+    rng = random.Random(4)
+    instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=rng)
+    assert len(instance["unit_tests"]) == 2
+    assert len(instance["submissions"]) == 5
+    assert len(instance["attendance_weeks"]) == 14
+
+
+def test_generate_subject_instance_component_scores_are_within_max_marks():
+    rng = random.Random(4)
+    instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=rng)
+    assert 0 <= instance["th_score"] <= 40
+    assert 0 <= instance["pr_tw_score"] <= 25
+    assert 0 <= instance["ete_score"] <= 60
+
+
+def test_generate_subject_instance_at_risk_label_matches_computed_thresholds():
+    rng = random.Random(4)
+    instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=True, rng=rng)
+    expected = (instance["final_attendance_pct"] < 75.0) or (instance["aggregate_pct"] < 40.0)
+    assert instance["at_risk"] == expected
+
+
+def test_generate_subject_instance_with_target_label_guarantees_at_risk_true():
+    rng = random.Random(123)
+    for _ in range(10):
+        instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, True, rng)
+        assert instance["at_risk"] is True
+
+
+def test_generate_subject_instance_with_target_label_guarantees_at_risk_false():
+    rng = random.Random(321)
+    for _ in range(10):
+        instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, False, rng)
+        assert instance["at_risk"] is False
+
+
+def test_at_risk_instance_does_not_start_already_failing():
+    # The decline must be visible over the term, not already broken at checkpoint 1.
+    rng = random.Random(123)
+    instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, True, rng)
+    first_unit_test_pct = instance["unit_tests"][0]["score"] / instance["unit_tests"][0]["max_marks"] * 100
+    assert first_unit_test_pct > 45.0
