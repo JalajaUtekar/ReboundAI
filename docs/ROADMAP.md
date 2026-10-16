@@ -29,7 +29,12 @@ No fixed deadline has been given — treat "done" as the state above, not a spec
   - Output: `data/synthetic_students.json` — 75 TY Computer Engineering students, 6 subjects each (DSML/CN/SPOS fixed + chosen MDM/OEL/Elective), 4 genuinely at-risk (gradual decline, cumulative-mean attendance, no ETE leakage into features).
   - Tests: `tests/data_generation/` — 34 passing.
   - Key interfaces later steps depend on: `generate_dataset(num_students=75, seed=42) -> list[dict]` and the per-subject record shape — see `scripts/data_generation/generator.py:188-204` for the exact dict shape, and `CHECKPOINTS_IN_TIME_ORDER` (`generator.py:119-122`) for the 7-checkpoint chronological order: `[("submission",0,wk2), ("submission",1,wk4), ("submission",2,wk6), ("unit_test",0,wk6), ("submission",3,wk8), ("submission",4,wk10), ("unit_test",1,wk12)]`.
-  - **SUPERSEDED — needs regeneration before Step 2 starts.** The spec changed after this plan was built: cohort size is now **120 students** (not 75), and the risk label now anchors to a **70% aggregate / 75% attendance** two-tier rule (not a single 40% cutoff) — see spec §4. The currently-merged `data/synthetic_students.json` reflects the old 75-student/40%-threshold design and must be regenerated before Step 2 can start. See the dataset-regeneration plan under `docs/superpowers/plans/` (added after this roadmap update) for how — don't invent a regeneration procedure here.
+  - **Regenerated** (commit `021095f`) to match the current spec: `data/synthetic_students.json` now has **120 students**, 12 at-risk (10.0%), 5 genuinely failing, two-tier `outcome.at_risk`/`outcome.is_failing` labels anchored to 70%/40% respectively. 43/43 tests passing. `web/data/synthetic_students.json` and `web/lib/dataset.ts` synced to match.
+- **Step 2 — Feature engineering** (commit `b7ceb9c` extraction, `9de3bee` skew/standardizer). `scripts/feature_engineering/extraction.py` (no-leakage prefix-row extraction, structurally leakage-free — only ever indexes by prefix length) + `scripts/feature_engineering/standardizer.py` (skew inspection, `LeakageFreeStandardizer`) + `scripts/build_training_rows.py` CLI. Output: `data/training_rows.json`/`.csv` — 4,320 rows (120 students × 6 subjects × 6 valid "as-of" prefixes), 72 at_risk rows, 30 is_failing rows. 64/64 tests passing at this point.
+- **Step 3 — Tri-model training & evaluation** (commits `48cf680` CV/metrics, `3545aaa` baselines, `a6a822e` CNN, `1c6e304` held-out split, `1e86d83`/`3a935d4` tuning, `d387efa` final report). Full writeup: [`models/benchmark_report.md`](../models/benchmark_report.md).
+  - Built: `scripts/training/cv.py` (student-grouped CV, group-aware oversampling, held-out test split), `scripts/training/metrics.py`, `scripts/training/baselines.py` (LogReg + GBDT), `scripts/training/cnn_model.py` (Conv1D + focal loss), `scripts/training/tune_logreg.py`, `scripts/training/tune_gbdt.py`.
+  - **Final winner: Logistic Regression** (C=0.1, oversample_ratio=0.5, threshold=0.90) — the only model clearing all four metrics (recall 0.833, precision 0.909, F1 0.870, PR-AUC 0.880) on the genuinely held-out 24-student test set. Gradient Boosting looked better on CV alone (overfit the tuning pool) but fell short on held-out data; the CNN's precision collapsed on held-out data despite decent recall. This CV→held-out reversal is itself documented in the report as the reason the held-out split matters.
+  - 124+ tests passing at this point (check `py -3 -m pytest tests/ -v` for current count).
 - **Basic frontend scaffold** — `web/` (Next.js App Router + TypeScript + Tailwind). Not part of a numbered plan — scaffolded directly (bounded, no brainstorm/plan ceremony) so there's something to visually check against as each step below lands. Currently a single dashboard page (`web/app/page.tsx`) reading `web/data/synthetic_students.json` (a committed copy of the root `data/synthetic_students.json`) via `web/lib/dataset.ts`, showing cohort stats and a per-student risk table with MMCOE branding (`web/public/mmcoe-logo.png`).
   - Run it: `npm run dev` from `web/` (or `preview_start` with the `rebound-ai-web` entry in `.claude/launch.json`), or ask Claude to start it.
   - Refresh its data after regenerating the dataset: `npm run sync-data` from `web/` (copies `../data/synthetic_students.json` in).
@@ -41,9 +46,7 @@ No fixed deadline has been given — treat "done" as the state above, not a spec
 
 Each step is its own brainstorm → spec-addition (if needed) → plan → subagent-driven-development cycle, same process as Plan 1. Don't skip straight to code — follow the process each time.
 
-**Before Step 2 starts**, `data/synthetic_students.json` must be regenerated against the current spec (120 students, 70%/40% two-tier label) — see the "Done" section's note on Plan 1 above and the dataset-regeneration plan under `docs/superpowers/plans/`.
-
-### Step 2: Dynamic feature engineering & prefix-row generation
+### Step 2: Dynamic feature engineering & prefix-row generation — ✅ DONE, see "Done" section above
 
 **Goal:** turn the regenerated `data/synthetic_students.json`'s full-term records into the actual training rows ScholarTrack's models will train on — per spec §4/§5, this means building rows at multiple "as-of checkpoint" prefixes (not the completed record) plus the engineered velocity/kinematic features, so the model learns to forecast from partial-term data, never from data that already contains its own answer.
 
@@ -59,7 +62,7 @@ Each step is its own brainstorm → spec-addition (if needed) → plan → subag
 
 ---
 
-### Step 3: Tri-model training, imbalance handling & evaluation
+### Step 3: Tri-model training, imbalance handling & evaluation — ✅ DONE, see "Done" section above and `models/benchmark_report.md`
 
 **Goal:** the actual CNN + Gradient Boosting + Logistic Regression training pipeline per spec §5's 11-point methodology — class weights, stratified student-grouped 5-fold CV, train-fold-only group-aware oversampling, optional focal loss, feature standardization, all three models compared under identical CV, custom recall-targeted cutoff tuning, and imbalance-appropriate metrics (recall/precision/F1/PR-AUC/confusion matrix, never bare accuracy).
 
@@ -81,9 +84,9 @@ Each step is its own brainstorm → spec-addition (if needed) → plan → subag
 **Goal:** per spec §5 point 9, every flagged student comes with *why* they were flagged (e.g. "attendance trend −32%, 3 late TW submissions"), using SHAP's model-agnostic explainers so it works regardless of which model type won Step 3's benchmark.
 
 **Resume prompt:**
-> Read `docs/superpowers/specs/2026-10-16-rebound-ai-design.md` Section 5 point 9, and Step 3's training output (check `docs/ROADMAP.md` for which model won the benchmark and its exact artifact path — update this prompt once Step 3 is done). Use `superpowers:brainstorming` (bounded — SHAP's role is already specified) to design a `generate_student_explanation()` function in `scripts/training/explainability.py` that:
+> Read `docs/superpowers/specs/2026-10-16-rebound-ai-design.md` Section 5 point 9, and `models/benchmark_report.md` for Step 3's full result. **The winner is Logistic Regression** (`scripts/training/baselines.py::train_and_predict_oof_logreg`, config C=0.1/oversample_ratio=0.5/threshold=0.90 — see the report for why it beat Gradient Boosting's better-looking CV numbers once evaluated on the genuinely held-out test set). Use `superpowers:brainstorming` (bounded — SHAP's role is already specified and the model is now known) to design a `generate_student_explanation()` function in `scripts/training/explainability.py` that:
 >
-> 1. Uses `shap.TreeExplainer` if Gradient Boosting won, or `shap.Explainer`/`shap.KernelExplainer` (model-agnostic, works against a plain prediction function) if the CNN or Logistic Regression won — **do not hardcode the explainer to the CNN**, since deployment is no longer CNN-only (spec §5's architecture paragraph: the deployed model is whichever won the benchmark, not pre-committed to the CNN).
+> 1. Uses `shap.LinearExplainer` (or `shap.Explainer`, which auto-selects appropriately for linear models) against the winning Logistic Regression model — simplest, most interpretable case; LogReg coefficients plus SHAP give very clean "why" explanations.
 > 2. Returns structured output: predicted risk probability, is-flagged boolean (recall-tuned cutoff from Step 3), top risk factors (positive SHAP values) and protective factors (negative SHAP values), and a human-readable summary string for faculty/students.
 > 3. Verify SHAP works directly against whichever serving path Step 5 exposes (Keras or the NumPy forward pass) — spec §5 point 9 notes this is a deliberate non-conflict.
 >
@@ -141,7 +144,7 @@ Each step is its own brainstorm → spec-addition (if needed) → plan → subag
 
 ### Step 8: Google Classroom integration (documented, future work)
 
-**Goal:** per spec §9/§11 point 11, document the architecture for a future Google Classroom sync — not built now, just specified so it's ready to pick up later.
+**Goal:** per spec §9/§11 point 11, document the architecture for a future Google Classroom sync — not built now, just specified so it's ready to pick up later. create a txt file with the architecture, justifying this future scope
 
 **Resume prompt:**
 > Read `docs/superpowers/specs/2026-10-16-rebound-ai-design.md` Section 9 (Out of scope / future work) and Section 5 point 11. Write an architectural design and code specification in `docs/GOOGLE_CLASSROOM_INTEGRATION.md` covering: OAuth scopes needed (`classroom.courses.readonly`, `classroom.coursework.students.readonly`, `classroom.student-submissions.students.readonly`), a data-sync pipeline mapping Google Classroom coursework to the `assessment_checkpoints` table from Step 5 (including how `submission.creationTime` vs. `courseWork.dueDate` maps to `avg_days_late`/`delay_acceleration`), a graceful fallback (manual CSV gradebook upload stays available alongside automated sync), and data-privacy/token-storage notes. This is documentation only — no code, no `superpowers:writing-plans`/`subagent-driven-development` cycle needed, just a clear spec a future session can implement from.
