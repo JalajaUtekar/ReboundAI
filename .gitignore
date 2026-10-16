@@ -4,3 +4,5 @@ __pycache__/
 .env
 .env.*
 !.env.example
+client_secret_*.json
+*.apps.googleusercontent.com.json
