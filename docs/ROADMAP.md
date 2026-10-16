@@ -14,6 +14,10 @@ Source of truth for all design decisions: [docs/superpowers/specs/2026-10-16-reb
   - Output: `data/synthetic_students.json` — 75 TY Computer Engineering students, 6 subjects each (DSML/CN/SPOS fixed + chosen MDM/OEL/Elective), 4 genuinely at-risk (gradual decline, cumulative-mean attendance, no ETE leakage into features).
   - Tests: `tests/data_generation/` — 34 passing.
   - Key interfaces later steps depend on: `generate_dataset(num_students=75, seed=42) -> list[dict]` and the per-subject record shape — see `scripts/data_generation/generator.py:188-204` for the exact dict shape, and `CHECKPOINTS_IN_TIME_ORDER` (`generator.py:119-122`) for the 7-checkpoint chronological order: `[("submission",0,wk2), ("submission",1,wk4), ("submission",2,wk6), ("unit_test",0,wk6), ("submission",3,wk8), ("submission",4,wk10), ("unit_test",1,wk12)]`.
+- **Basic frontend scaffold** — `web/` (Next.js App Router + TypeScript + Tailwind). Not part of a numbered plan — scaffolded directly (bounded, no brainstorm/plan ceremony) so there's something to visually check against as each step below lands. Currently a single dashboard page (`web/app/page.tsx`) reading `web/data/synthetic_students.json` (a committed copy of the root `data/synthetic_students.json`) via `web/lib/dataset.ts`, showing cohort stats and a per-student risk table with MMCOE branding (`web/public/mmcoe-logo.png`).
+  - Run it: `npm run dev` from `web/` (or `preview_start` with the `rebound-ai-web` entry in `.claude/launch.json`), or ask Claude to start it.
+  - Refresh its data after regenerating the dataset: `npm run sync-data` from `web/` (copies `../data/synthetic_students.json` in).
+  - **As each later step lands, extend this app rather than rebuilding it**: Step 2/3's training rows and risk predictions, Step 5's Supabase connection, Step 6's API — each should replace or augment `lib/dataset.ts`'s local-file read with a real data source, and new pages/sections get added to `app/`, following Step 7's fuller design once that step is reached.
 
 ---
 
