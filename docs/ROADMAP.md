@@ -95,7 +95,11 @@ Each step is its own brainstorm → spec-addition (if needed) → plan → subag
 
 ---
 
-### Step 5: Pure-NumPy inference (all three model types) + Supabase schema, auth & RLS
+### Step 5a: Pure-NumPy inference (all three model types) — ✅ DONE
+
+(commit `65dc286`) `scripts/inference/numpy_logreg.py` (deployed — exact parity, 0.023ms/call), `numpy_gbdt.py` (full ensemble traversal, exact parity), `numpy_cnn.py` (parity within float tolerance). Exported weights: `scripts/inference/numpy_logreg_exported.npz`. 150/150 tests passing at this point.
+
+### Step 5b: Supabase schema, auth & RLS
 
 **Goal:** two tightly-coupled deliverables — (a) per spec §5's architecture paragraph, a lightweight NumPy/plain-Python serving path for **all three** model types (CNN forward pass, Logistic Regression dot product, Gradient Boosting decision-tree traversal), since deployment isn't pre-committed to the CNN; and (b) the Supabase Postgres schema per spec §7, now including the `profiles`/role table and RLS policies from spec §8, plus Auth with the demo account.
 
