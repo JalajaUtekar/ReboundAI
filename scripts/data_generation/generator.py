@@ -78,3 +78,23 @@ def select_at_risk_students(
     max_count = max(min_count, math.floor(max_rate * n))
     count = rng.randint(min_count, max_count)
     return rng.sample(student_ids, count)
+
+
+def declining_series(start: float, end: float, n: int, noise: float, rng: random.Random) -> List[float]:
+    """A linear ramp from `start` to `end` over `n` points, with noise, clipped to [0, 100].
+
+    Used for at-risk trajectories: the ramp spreads the decline across every
+    point rather than cliff-dropping between two checkpoints.
+    """
+    values = []
+    for idx in range(n):
+        t = idx / max(1, n - 1)
+        base = start + (end - start) * t
+        noisy = base + rng.gauss(0, noise)
+        values.append(max(0.0, min(100.0, noisy)))
+    return values
+
+
+def stable_series(level: float, n: int, noise: float, rng: random.Random) -> List[float]:
+    """`n` points hovering around `level` with noise, clipped to [0, 100]. Used for students in good standing."""
+    return [max(0.0, min(100.0, level + rng.gauss(0, noise))) for _ in range(n)]

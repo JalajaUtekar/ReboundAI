@@ -68,3 +68,35 @@ def test_select_at_risk_students_respects_custom_rate_bounds():
     rng = random.Random(11)
     at_risk = select_at_risk_students(student_ids, rng, min_rate=0.10, max_rate=0.10)
     assert len(at_risk) == 10
+
+
+from scripts.data_generation.generator import declining_series, stable_series
+
+
+def test_declining_series_has_correct_length_and_bounds():
+    rng = random.Random(5)
+    series = declining_series(start=85, end=30, n=7, noise=0.0, rng=rng)
+    assert len(series) == 7
+    assert all(0.0 <= v <= 100.0 for v in series)
+
+
+def test_declining_series_actually_declines_overall():
+    rng = random.Random(5)
+    series = declining_series(start=85, end=30, n=7, noise=0.0, rng=rng)
+    assert series[0] > series[-1] + 30  # a real, large drop end to end
+
+
+def test_declining_series_is_gradual_not_a_cliff():
+    # With zero noise the ramp is linear, so no single step should account
+    # for most of the total drop -- the decline must be spread across steps.
+    rng = random.Random(5)
+    series = declining_series(start=90, end=20, n=8, noise=0.0, rng=rng)
+    total_drop = series[0] - series[-1]
+    biggest_single_step = max(series[i] - series[i + 1] for i in range(len(series) - 1))
+    assert biggest_single_step < total_drop * 0.5
+
+
+def test_stable_series_stays_near_level():
+    rng = random.Random(2)
+    series = stable_series(level=82.0, n=10, noise=0.0, rng=rng)
+    assert all(v == 82.0 for v in series)
