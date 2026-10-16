@@ -17,5 +17,5 @@ def test_cli_writes_valid_json_dataset(tmp_path):
     with open(output_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    assert len(data) == 75
+    assert len(data) == 120
     assert len(data[0]["subjects"]) == 6

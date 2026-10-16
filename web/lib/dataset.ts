@@ -6,6 +6,7 @@ export type SubjectOutcome = {
   aggregate_pct: number;
   final_attendance_pct: number;
   at_risk: boolean;
+  is_failing: boolean;
 };
 
 export type Subject = {

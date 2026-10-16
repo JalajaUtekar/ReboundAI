@@ -2,7 +2,7 @@
 
 import math
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .subjects import (
     ELECTIVE_OPTIONS,
@@ -69,15 +69,33 @@ def assign_subjects(rng: random.Random) -> List[Dict]:
 def select_at_risk_students(
     student_ids: List[str],
     rng: random.Random,
-    min_rate: float = 0.05,
+    min_rate: float = 0.10,
     max_rate: float = 0.15,
 ) -> List[str]:
-    """Picks a 5-15% (by default) minority of students to be genuinely falling behind."""
+    """Picks a 10-15% (by default) minority of students to be genuinely falling behind."""
     n = len(student_ids)
     min_count = max(1, math.ceil(min_rate * n))
     max_count = max(min_count, math.floor(max_rate * n))
     count = rng.randint(min_count, max_count)
     return rng.sample(student_ids, count)
+
+
+def select_failing_students(
+    at_risk_student_ids: List[str],
+    rng: random.Random,
+    min_rate: float = 0.3,
+    max_rate: float = 0.5,
+) -> List[str]:
+    """Picks a smaller share (30-50% by default) of the at-risk minority to be genuinely
+    failing (aggregate < 40%), rather than merely at-risk (aggregate < 70% or attendance < 75%).
+    """
+    n = len(at_risk_student_ids)
+    if n == 0:
+        return []
+    min_count = max(1, math.ceil(min_rate * n))
+    max_count = max(min_count, min(n, math.floor(max_rate * n)))
+    count = rng.randint(min_count, max_count)
+    return rng.sample(at_risk_student_ids, count)
 
 
 def declining_series(start: float, end: float, n: int, noise: float, rng: random.Random) -> List[float]:
@@ -101,7 +119,8 @@ def stable_series(level: float, n: int, noise: float, rng: random.Random) -> Lis
 
 
 ATTENDANCE_RISK_THRESHOLD = 75.0
-AGGREGATE_RISK_THRESHOLD = 40.0
+RISK_MARKS_THRESHOLD = 70.0  # "at risk" aggregate cutoff -- the real training target
+FAILING_THRESHOLD = 40.0  # separate, more severe "failing" fact (the actual SPPU passing cutoff)
 NUM_WEEKS = 14
 UNIT_TEST_WEEKS = [6, 12]
 SUBMISSION_WEEKS = [2, 4, 6, 8, 10]
@@ -122,26 +141,37 @@ CHECKPOINTS_IN_TIME_ORDER = sorted(
 )
 
 
-def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) -> Dict:
-    """Generates one student's full-term record for one subject, and computes its risk label.
+def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random, failing: bool = False) -> Dict:
+    """Generates one student's full-term record for one subject, and computes its risk labels.
 
-    ETE is only ever used below to compute the label -- it is never part of the
+    ETE is only ever used below to compute the labels -- it is never part of the
     per-checkpoint feature trajectory a forecasting model would train on.
+
+    `failing` only affects the at-risk branch: it biases the decline to end further
+    below the 40% failing threshold (vs. just below the 70% at-risk threshold), so a
+    smaller, explicitly-controlled share of at-risk students are genuinely failing
+    rather than it being left to chance. Ignored when `at_risk` is False.
     """
     components = subject["components"]
     pr_tw_key = "PR" if "PR" in components else "TW"
     num_marks_points = 2 + len(SUBMISSION_WEEKS)
 
     if at_risk:
-        marks_pct_series = declining_series(rng.uniform(65, 85), rng.uniform(20, 38), num_marks_points, 4.0, rng)
+        if failing:
+            # Decline ends well below the 40% failing threshold.
+            marks_end = rng.uniform(15, 32)
+        else:
+            # Decline ends below the 70% at-risk threshold but mostly above 40%.
+            marks_end = rng.uniform(38, 58)
+        marks_pct_series = declining_series(rng.uniform(65, 85), marks_end, num_marks_points, 4.0, rng)
         attendance_series = declining_series(rng.uniform(80, 95), rng.uniform(60, 74), NUM_WEEKS, 2.5, rng)
         lateness_series = declining_series(rng.uniform(0, 1), rng.uniform(3, 7), len(SUBMISSION_WEEKS), 1.0, rng)
     else:
         if rng.random() < 0.35:
-            # Realistic moderation bump: a chunk of "fine" students cluster just above the pass cutoff.
-            level = rng.uniform(AGGREGATE_RISK_THRESHOLD, AGGREGATE_RISK_THRESHOLD + 10)
+            # Realistic moderation bump: a chunk of "fine" students cluster just above the risk cutoff.
+            level = rng.uniform(RISK_MARKS_THRESHOLD, RISK_MARKS_THRESHOLD + 10)
         else:
-            level = rng.uniform(AGGREGATE_RISK_THRESHOLD + 10, 95)
+            level = rng.uniform(RISK_MARKS_THRESHOLD + 10, 95)
         marks_pct_series = stable_series(level, num_marks_points, 4.0, rng)
         attendance_series = stable_series(rng.uniform(78, 97), NUM_WEEKS, 2.0, rng)
         lateness_series = stable_series(rng.uniform(0, 1.5), len(SUBMISSION_WEEKS), 0.5, rng)
@@ -177,13 +207,14 @@ def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) 
     )
 
     if at_risk:
-        ete_pct = rng.uniform(15, 38)
+        ete_pct = rng.uniform(10, 30) if failing else rng.uniform(25, 45)
     else:
         ete_pct = max(0.0, min(100.0, marks_pct_series[-1] + rng.gauss(0, 5)))
     ete_score = round(ete_pct / 100 * 60, 1)
 
     aggregate_pct = round((th_score + ete_score + pr_tw_score) / 125 * 100, 1)
-    computed_at_risk = (final_attendance_pct < ATTENDANCE_RISK_THRESHOLD) or (aggregate_pct < AGGREGATE_RISK_THRESHOLD)
+    computed_at_risk = (final_attendance_pct < ATTENDANCE_RISK_THRESHOLD) or (aggregate_pct < RISK_MARKS_THRESHOLD)
+    computed_is_failing = aggregate_pct < FAILING_THRESHOLD
 
     return {
         "subject_slug": subject["subject_slug"],
@@ -200,6 +231,7 @@ def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) 
             "aggregate_pct": aggregate_pct,
             "final_attendance_pct": final_attendance_pct,
             "at_risk": computed_at_risk,
+            "is_failing": computed_is_failing,
         },
     }
 
@@ -208,42 +240,60 @@ def generate_subject_instance_with_target_label(
     subject: Dict,
     target_at_risk: bool,
     rng: random.Random,
-    max_attempts: int = 20,
+    max_attempts: int = 40,
+    target_failing: Optional[bool] = None,
 ) -> Dict:
-    """Retries `generate_subject_instance` until its computed label matches the intended one.
+    """Retries `generate_subject_instance` until its computed labels match the intended ones.
 
-    The label is always computed from the generated numbers (never hand-set),
+    The labels are always computed from the generated numbers (never hand-set),
     so this just rejects the rare draw that lands on the wrong side of a
     threshold rather than overriding it.
+
+    `target_failing=None` (the default) means "don't care" -- only `at_risk` is
+    matched, preserving the original behavior. Passing an explicit bool also
+    requires `is_failing` to match it, which is how `generate_dataset` guarantees
+    a controlled, non-empty, non-total share of failing instances.
     """
     for _ in range(max_attempts):
-        instance = generate_subject_instance(subject, at_risk=target_at_risk, rng=rng)
-        if instance["outcome"]["at_risk"] == target_at_risk:
-            return instance
+        instance = generate_subject_instance(subject, at_risk=target_at_risk, rng=rng, failing=bool(target_failing))
+        outcome = instance["outcome"]
+        if outcome["at_risk"] != target_at_risk:
+            continue
+        if target_failing is not None and outcome["is_failing"] != target_failing:
+            continue
+        return instance
     raise RuntimeError(
         f"Could not generate a '{subject['subject_slug']}' instance with at_risk={target_at_risk} "
-        f"after {max_attempts} attempts"
+        f"target_failing={target_failing} after {max_attempts} attempts"
     )
 
 
-def generate_dataset(num_students: int = 75, seed: int = 42) -> List[Dict]:
+def generate_dataset(num_students: int = 120, seed: int = 42) -> List[Dict]:
     """Generates the full synthetic TY Computer Engineering cohort, deterministic for a given seed."""
     rng = random.Random(seed)
 
     roster = generate_roster(num_students, rng)
     student_ids = [s["student_id"] for s in roster]
-    at_risk_ids = set(select_at_risk_students(student_ids, rng))
+    at_risk_ids_list = select_at_risk_students(student_ids, rng)
+    at_risk_ids = set(at_risk_ids_list)
+    failing_ids = set(select_failing_students(at_risk_ids_list, rng))
 
     dataset = []
     for student in roster:
         subject_specs = assign_subjects(rng)
         is_at_risk_student = student["student_id"] in at_risk_ids
+        is_failing_student = student["student_id"] in failing_ids
         flagged_index = rng.randrange(len(subject_specs)) if is_at_risk_student else None
 
         subjects = []
         for idx, subject in enumerate(subject_specs):
             target_at_risk = is_at_risk_student and idx == flagged_index
-            subjects.append(generate_subject_instance_with_target_label(subject, target_at_risk, rng))
+            target_failing = is_failing_student if target_at_risk else False
+            subjects.append(
+                generate_subject_instance_with_target_label(
+                    subject, target_at_risk, rng, target_failing=target_failing
+                )
+            )
 
         dataset.append({**student, "subjects": subjects})
 

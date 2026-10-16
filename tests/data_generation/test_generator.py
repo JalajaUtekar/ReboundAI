@@ -48,15 +48,15 @@ def test_assign_subjects_choice_slots_come_from_their_pools():
 from scripts.data_generation.generator import select_at_risk_students
 
 
-def test_select_at_risk_students_count_within_5_to_15_percent():
-    student_ids = [f"S{i:03d}" for i in range(1, 76)]
+def test_select_at_risk_students_count_within_10_to_15_percent():
+    student_ids = [f"S{i:03d}" for i in range(1, 121)]
     rng = random.Random(3)
     at_risk = select_at_risk_students(student_ids, rng)
-    assert 4 <= len(at_risk) <= 11  # ceil(5% of 75) .. floor(15% of 75)
+    assert 12 <= len(at_risk) <= 18  # ceil(10% of 120) .. floor(15% of 120)
 
 
 def test_select_at_risk_students_returns_subset_with_no_duplicates():
-    student_ids = [f"S{i:03d}" for i in range(1, 76)]
+    student_ids = [f"S{i:03d}" for i in range(1, 121)]
     rng = random.Random(9)
     at_risk = select_at_risk_students(student_ids, rng)
     assert len(at_risk) == len(set(at_risk))
@@ -68,6 +68,22 @@ def test_select_at_risk_students_respects_custom_rate_bounds():
     rng = random.Random(11)
     at_risk = select_at_risk_students(student_ids, rng, min_rate=0.10, max_rate=0.10)
     assert len(at_risk) == 10
+
+
+from scripts.data_generation.generator import select_failing_students
+
+
+def test_select_failing_students_is_a_smaller_nonempty_proper_subset():
+    at_risk_ids = [f"S{i:03d}" for i in range(1, 16)]  # 15 at-risk students
+    rng = random.Random(13)
+    failing = select_failing_students(at_risk_ids, rng)
+    assert 1 <= len(failing) < len(at_risk_ids)
+    assert set(failing).issubset(set(at_risk_ids))
+
+
+def test_select_failing_students_returns_empty_for_empty_input():
+    rng = random.Random(13)
+    assert select_failing_students([], rng) == []
 
 
 from scripts.data_generation.generator import declining_series, stable_series
@@ -134,8 +150,28 @@ def test_generate_subject_instance_at_risk_label_matches_computed_thresholds():
     rng = random.Random(4)
     instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=True, rng=rng)
     outcome = instance["outcome"]
-    expected = (outcome["final_attendance_pct"] < 75.0) or (outcome["aggregate_pct"] < 40.0)
+    expected = (outcome["final_attendance_pct"] < 75.0) or (outcome["aggregate_pct"] < 70.0)
     assert outcome["at_risk"] == expected
+
+
+def test_generate_subject_instance_is_failing_label_matches_computed_threshold():
+    rng = random.Random(4)
+    instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=True, rng=rng, failing=True)
+    outcome = instance["outcome"]
+    assert outcome["is_failing"] == (outcome["aggregate_pct"] < 40.0)
+
+
+def test_is_failing_implies_at_risk_invariant():
+    # 40% < 70%, so a failing aggregate must also be an at-risk aggregate -- checked
+    # across a range of seeds and both at_risk/failing combinations, not just one draw.
+    for seed in range(100):
+        rng = random.Random(seed)
+        at_risk_flag = seed % 2 == 0
+        failing_flag = seed % 3 == 0
+        instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=at_risk_flag, rng=rng, failing=failing_flag)
+        outcome = instance["outcome"]
+        if outcome["is_failing"]:
+            assert outcome["at_risk"] is True, (seed, outcome)
 
 
 def test_generate_subject_instance_with_target_label_guarantees_at_risk_true():
@@ -152,6 +188,22 @@ def test_generate_subject_instance_with_target_label_guarantees_at_risk_false():
         assert instance["outcome"]["at_risk"] is False
 
 
+def test_generate_subject_instance_with_target_label_guarantees_failing_true():
+    rng = random.Random(555)
+    for _ in range(10):
+        instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, True, rng, target_failing=True)
+        assert instance["outcome"]["at_risk"] is True
+        assert instance["outcome"]["is_failing"] is True
+
+
+def test_generate_subject_instance_with_target_label_guarantees_at_risk_not_failing():
+    rng = random.Random(777)
+    for _ in range(10):
+        instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, True, rng, target_failing=False)
+        assert instance["outcome"]["at_risk"] is True
+        assert instance["outcome"]["is_failing"] is False
+
+
 def test_at_risk_instance_does_not_start_already_failing():
     # The decline must be visible over the term, not already broken at the first
     # chronological checkpoint, which is the week-2 submission.
@@ -164,13 +216,13 @@ def test_at_risk_instance_does_not_start_already_failing():
 
 
 def test_at_risk_label_is_computed_not_echoed_from_input_flag():
-    # Seed 28 with at_risk=False computes to at_risk=True via the aggregate threshold,
+    # Seed 28 with at_risk=False computes to at_risk=True via the aggregate<70 threshold,
     # with attendance remaining above the 75% cutoff.
     # If the return value ever echoed the input flag, this would fail.
     instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=random.Random(28))
     outcome = instance["outcome"]
     assert outcome["final_attendance_pct"] >= 75.0
-    assert outcome["aggregate_pct"] < 40.0
+    assert outcome["aggregate_pct"] < 70.0
     assert outcome["at_risk"] is True
 
 
@@ -185,30 +237,51 @@ def test_aggregate_pct_matches_component_formula():
 from scripts.data_generation.generator import generate_dataset
 
 
-def test_generate_dataset_produces_75_students_with_6_subjects_each():
-    dataset = generate_dataset(num_students=75, seed=42)
-    assert len(dataset) == 75
+def test_generate_dataset_produces_120_students_with_6_subjects_each():
+    dataset = generate_dataset(num_students=120, seed=42)
+    assert len(dataset) == 120
     assert all(len(student["subjects"]) == 6 for student in dataset)
 
 
+def test_generate_dataset_defaults_to_120_students():
+    dataset = generate_dataset(seed=42)
+    assert len(dataset) == 120
+
+
 def test_generate_dataset_is_reproducible_for_a_fixed_seed():
-    first = generate_dataset(num_students=75, seed=42)
-    second = generate_dataset(num_students=75, seed=42)
+    first = generate_dataset(num_students=120, seed=42)
+    second = generate_dataset(num_students=120, seed=42)
     assert first == second
 
 
-def test_generate_dataset_at_risk_student_rate_is_within_5_to_15_percent():
-    dataset = generate_dataset(num_students=75, seed=42)
+def test_generate_dataset_at_risk_student_rate_is_within_10_to_15_percent():
+    dataset = generate_dataset(num_students=120, seed=42)
     at_risk_students = [s for s in dataset if any(subj["outcome"]["at_risk"] for subj in s["subjects"])]
     rate = len(at_risk_students) / len(dataset)
-    assert 0.05 <= rate <= 0.15
+    assert 0.10 <= rate <= 0.15
 
 
 def test_generate_dataset_at_risk_students_have_exactly_one_flagged_subject():
-    dataset = generate_dataset(num_students=75, seed=42)
+    dataset = generate_dataset(num_students=120, seed=42)
     for student in dataset:
         flagged = [subj for subj in student["subjects"] if subj["outcome"]["at_risk"]]
         assert len(flagged) in (0, 1), student["student_id"]
+
+
+def test_generate_dataset_has_at_least_one_but_not_all_failing_instances():
+    dataset = generate_dataset(num_students=120, seed=42)
+    all_subjects = [subj for student in dataset for subj in student["subjects"]]
+    failing = [subj for subj in all_subjects if subj["outcome"]["is_failing"]]
+    assert 1 <= len(failing) < len(all_subjects)
+
+
+def test_generate_dataset_is_failing_implies_at_risk_across_all_instances():
+    dataset = generate_dataset(num_students=120, seed=42)
+    for student in dataset:
+        for subj in student["subjects"]:
+            outcome = subj["outcome"]
+            if outcome["is_failing"]:
+                assert outcome["at_risk"] is True, (student["student_id"], subj["subject_slug"])
 
 
 from scripts.data_generation.generator import CHECKPOINTS_IN_TIME_ORDER
