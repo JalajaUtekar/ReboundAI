@@ -57,14 +57,18 @@ So every TY CE student ends up with exactly **6 subjects**: DSML, CN, SPOS + the
 
 ## 4. Synthetic dataset
 
-- **75 students**, Department of Computer Engineering, TY. Each is randomly assigned one MDM, one OEL, one Elective (from the lists above) in addition to the 3 fixed subjects — 6 subject-records per student, 450 subject-level training rows.
-- **5-15% minority at risk**, enforced at generation time (not an emergent property of random noise — the generator targets a risk rate in that range per run).
-- **Per-subject, per-checkpoint feature vector** (5 features, same shape as Lecture2Revision's existing LSTM, deliberately — one consistent "sequence feature" convention across the whole app):
+- **120 students** (the department's real TY CE branch size), Department of Computer Engineering, TY. Each is randomly assigned one MDM, one OEL, one Elective (from the lists above) in addition to the 3 fixed subjects — 6 subject-records per student, 720 subject-level instances.
+- **10-15% minority at risk**, enforced at generation time (not an emergent property of random noise — the generator targets a risk rate in that range per run). At 120 students this is ~12-18 at-risk students — enough for proper 5-fold grouped cross-validation (Section 5), which the earlier 75-student/4-at-risk-student draw could not support.
+- **Per-subject, per-checkpoint feature vector** (5 raw features, same shape as Lecture2Revision's existing LSTM, deliberately — one consistent "sequence feature" convention across the whole app):
   `[internal_marks_pct, assignment_marks_pct, attendance_pct, on_time_submission_ratio, avg_days_late]`
-- **Label, grounded in real rules, not an arbitrary synthetic cutoff:** a student is *at risk* in a subject if attendance ends below 75% (the actual university ETE-eligibility rule) **OR** the weighted aggregate (TH+ETE+PR/TW, normalized to 100) ends below 40% (the actual SPPU passing threshold). ETE is used only here, in computing the label — never as an input feature.
+  Plus **engineered dynamic (velocity) features**, computed from consecutive checkpoints during feature engineering (not stored per-checkpoint in the raw generator, derived downstream): `attendance_velocity` (slope over the trailing checkpoints), `marks_velocity` (delta between latest and preceding marks checkpoint), `delay_acceleration` (change in `avg_days_late` between recent submissions), `attendance_deficit_margin` (`attendance_pct - 75.0`), `marks_deficit_margin` (`aggregate_pct_so_far - 70.0` — anchored to the risk threshold below, not the pass/fail threshold).
+- **Two-tier label, grounded in real rules, not an arbitrary synthetic cutoff:**
+  - ***At risk of falling behind*** (the actual ScholarTrack training target) — a student is at risk in a subject if attendance ends below 75% (the actual university ETE-eligibility rule) **OR** the weighted aggregate (TH+ETE+PR/TW, normalized to 100) ends below **70%**. This is deliberately more sensitive than outright failing — "falling behind" is meant to catch strugglers early, before they fail, which is the whole premise of the product's name.
+  - ***Failing*** (a separate, more severe, informational fact — not the training target) — aggregate ends below **40%** (the actual SPPU passing threshold). Every failing student is automatically also at-risk (40% < 70%), but not every at-risk student is failing. Displayed to students/faculty as a harder status, never trained on directly.
+  - ETE is used only here, in computing both labels — never as an input feature.
 - **No-leakage training construction:** for each student-subject, generate training examples at multiple "as-of" checkpoints through the term (after unit test 1, after unit test 1+2, etc.), where X = everything known *as of that checkpoint* and y = the eventual end-of-semester outcome. The model never sees the checkpoint that defines its own label.
 - **At-risk trajectories are gradual, not a cliff.** A minority-class student-subject is generated as a genuine downward *trend* across checkpoints — marks, attendance, and submission timeliness each drift down with realistic noise over the term, crossing the risk thresholds only by the final checkpoints. No student jumps straight from "fine" to "below 75% attendance" between two checkpoints; the decline is visible several checkpoints before the final outcome, which is what makes early forecasting meaningful and testable (recall at checkpoint 3 vs. checkpoint 5 becomes a real metric, not a given).
-- **Majority-class marks cluster near the passing threshold, not spread smoothly.** Real exam score distributions aren't a clean bell curve — moderation and grace-marking produce a visible bump of students just above the pass cutoff. The generator should bias a meaningful share of "doing fine" students' component marks (TH/ETE/PR/TW) to land just above 40%, rather than sampling uniformly/normally across the full passing range, so the synthetic distribution looks like a real gradebook rather than a textbook Gaussian.
+- **Majority-class marks cluster near the risk threshold, not spread smoothly.** Real exam score distributions aren't a clean bell curve — moderation and grace-marking produce a visible bump of students just above a cutoff. The generator should bias a meaningful share of "doing fine" students' component marks to land just above **70%** (the new risk threshold, not 40%), rather than sampling uniformly/normally across the full passing range, so the synthetic distribution looks like a real gradebook rather than a textbook Gaussian. A smaller share of the at-risk minority should land below 40% (genuinely failing) so the "failing" fact has real positive examples too.
 
 Output: a reproducible `scripts/generate_demo_data.py`-equivalent that writes directly into the Supabase schema (Section 7), plus a flat CSV/JSON export for the training notebook.
 
@@ -74,10 +78,10 @@ Output: a reproducible `scripts/generate_demo_data.py`-equivalent that writes di
 
 Directly maps to the mentor's review checklist:
 
-1. **Synthetic 75-student, 5-15% minority generation** — Section 4.
+1. **Synthetic 120-student, 10-15% minority generation** — Section 4.
 2. **Class weights** passed to the loss function during training.
-3. **Stratified k-fold (or leave-one-out) cross-validation**, not a single train/val/test split — with ~4-11 positives out of 75, a single split is too noisy to trust. Cutoff threshold is tuned per the CV protocol against a target recall, not left at the default 0.5.
-4. **Oversampling** (SMOTE or random) applied to **training folds only**.
+3. **Stratified, student-grouped k-fold cross-validation (5 folds)**, not a single train/val/test split — a single split is too noisy to trust at this scale. Folds are grouped by `student_id` (not by row), since Section 4's no-leakage construction produces multiple correlated "as-of checkpoint" rows per student-subject — splitting at the row level would leak one student's prefix rows across train and validation. At 120 students / 10-15% minority (~12-18 at-risk students) this comfortably supports 5 folds; if a future run ever has fewer than 5 at-risk students, fall back to leave-one-(positive-student)-out. Cutoff threshold is tuned per the CV protocol against a target recall (≥88-92%), not left at the default 0.5.
+4. **Oversampling** (SMOTE or random) applied to **training folds only**, and group-aware: a positive student-subject's 6 prefix rows are near-duplicates of the same trajectory, so naive row-level SMOTE mostly interpolates within one student's own decline rather than adding real diversity. Oversample at the student-subject level (duplicate/jitter a whole trajectory with noise) rather than treating individual prefix-rows as independent samples.
 5. **Test/validation folds are never oversampled** — evaluation stays on the real class distribution.
 6. **Focal loss** offered as a selectable alternative to weighted cross-entropy, for if the imbalance proves too extreme for class-weighting alone.
 7. **Feature skew check + standardization** (fit strictly on training folds, same leakage discipline as Lecture2Revision's existing `StandardScaler` usage) before any model sees the data.
@@ -86,7 +90,7 @@ Directly maps to the mentor's review checklist:
 10. **Metrics reported**: recall, precision, F1, PR-AUC, and a confusion matrix — never bare accuracy, since always predicting "not at risk" already scores 85-95% on this class balance and would be a meaningless win.
 11. **Google Classroom integration** is noted as future work in the README; not built now.
 
-**Architecture**: Conv1D (as in the original ScholarTrack notebook, matching the course's CNN unit) over the *checkpoints available so far* — not the whole completed term — producing a per-subject risk probability. Trained in a notebook/script with Keras; weights then exported and re-implemented as a small pure-NumPy forward pass (mirroring `lstm_model.py`'s existing `NumPyLSTMModel` pattern) so the production serverless function never needs TensorFlow installed.
+**Architecture**: Conv1D (as in the original ScholarTrack notebook, matching the course's CNN unit) over the *checkpoints available so far* — not the whole completed term — producing a per-subject risk probability. The CNN is always trained and always appears in the benchmark table (it's the course's required technique), but **the model that actually gets deployed is whichever of CNN / Gradient Boosting / Logistic Regression wins the CV benchmark** — deployment is not pre-committed to the CNN. All three therefore need a lightweight serving path: the CNN's and Logistic Regression's forward passes re-implemented as pure NumPy (mirroring `lstm_model.py`'s existing `NumPyLSTMModel` pattern), and Gradient Boosting served via a plain-Python/NumPy decision-tree traversal of its learned splits — so the production serverless function never needs TensorFlow, PyTorch, or a full scikit-learn/LightGBM runtime installed, whichever model wins.
 
 ---
 
@@ -108,7 +112,8 @@ Carried over from Lecture2Revision almost unmodified:
 
 - **Frontend**: Next.js (App Router) + TypeScript + Tailwind — UI only, calls the backend over HTTP. MMCOE branding (`assets/mmcoe-logo.png`, "Department of Computer Engineering") on login/dashboard.
 - **Backend**: Vercel Python Serverless Functions (`/api/*.py`) — PyMuPDF, the extractive generator, SM-2, the LSTM, and the new ScholarTrack NumPy-served CNN all run here, carried over from the two source projects with minimal changes (Section 5 and 6).
-- **Database**: Supabase Postgres. Same entities as Lecture2Revision's existing SQLite schema, extended with ScholarTrack's academic structure:
+- **Database**: Supabase Postgres. Same entities as Lecture2Revision's existing SQLite schema, extended with ScholarTrack's academic structure, plus the `profiles`/role table from Section 8:
+  - `profiles` (id → auth.users.id, role [student/professor/hod/principal], department) — Section 8.
   - `students` (name, prn, email, photo_url, branch, academic_year — gated to CE/TY for now)
   - `student_subjects` (student_id, subject_slug, chosen_variant — e.g. which MDM/OEL/Elective)
   - `assessment_checkpoints` (student_id, subject_slug, checkpoint_type [unit_test/submission/attendance_week], value, due_date, submitted_date)
@@ -121,17 +126,33 @@ Carried over from Lecture2Revision almost unmodified:
 
 ---
 
-## 8. Out of scope / future work
+## 8. Roles & access control
+
+Four-tier role-based access, enforced via Supabase Row-Level Security — a real expansion of Section 7's original single-student-account model, so Section 7's `students` table and auth design should be read together with this section.
+
+- **Student** — can read/update only their own row: their own scores, risk status, and the Lecture2Revision portal for their own flagged subjects. No visibility into other students.
+- **Professor** — read access to all students within their department (only CE exists for now, per Section 2's gating; the role model already supports more).
+- **Head of Department (HOD)** — admin for their own department: everything a Professor sees, plus department-level management.
+- **Principal** — admin across *all* departments, including ones not yet live (Section 2's branch gating).
+
+This needs a `profiles` table distinct from `students` (a professor/HOD/principal is not a student record): `profiles` (`id` UUID → `auth.users.id`, `role` enum [`student`, `professor`, `hod`, `principal`], `department` — null/all for principal, set for professor/HOD, matching the student's own `branch` for a student-linked profile). RLS policies key off `profiles.role` and `profiles.department` rather than assuming every authenticated user is a student.
+
+Only the **Student** tier is needed for the hackathon demo's registration flow (Section 2); Professor/HOD/Principal accounts and their dashboards are a later phase, but the schema (Section 7) should be designed for all four from the start so adding them later is additive, not a migration.
+
+---
+
+## 9. Out of scope / future work
 
 - Branches other than CE, years other than TY (UI already gates for this; just flip the disabled flags later).
 - Google Classroom sync (mentor's point 8).
 - Google OAuth itself (needs the user's own Google Cloud credentials — documented, not auto-configured).
 - Any backend other than `offline_extractive` being the default revision-generation path (Gemini etc. stay optional).
+- Professor/HOD/Principal dashboards and workflows (Section 8 defines the access model now; the UI for these roles is future work).
 
 ---
 
-## 9. Testing
+## 10. Testing
 
 - Pytest suite carried over/extended from Lecture2Revision for the untouched modules (SM-2, extractive generator, LSTM, adaptive engine).
-- New tests for: synthetic data generator's risk-rate bounds (5-15%), the no-leakage checkpoint construction, the NumPy CNN forward pass matching the Keras model's output within tolerance, and the risk-boost term in `calculate_topic_priority`.
+- New tests for: synthetic data generator's risk-rate bounds (10-15%), the no-leakage checkpoint construction, the NumPy CNN forward pass matching the Keras model's output within tolerance, and the risk-boost term in `calculate_topic_priority`.
 - Model evaluation report (CV metrics, baseline comparison, SHAP examples) generated as part of the training script, not hand-written.
