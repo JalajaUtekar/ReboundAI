@@ -35,6 +35,7 @@ No fixed deadline has been given — treat "done" as the state above, not a spec
   - Built: `scripts/training/cv.py` (student-grouped CV, group-aware oversampling, held-out test split), `scripts/training/metrics.py`, `scripts/training/baselines.py` (LogReg + GBDT), `scripts/training/cnn_model.py` (Conv1D + focal loss), `scripts/training/tune_logreg.py`, `scripts/training/tune_gbdt.py`.
   - **Final winner: Logistic Regression** (C=0.1, oversample_ratio=0.5, threshold=0.90) — the only model clearing all four metrics (recall 0.833, precision 0.909, F1 0.870, PR-AUC 0.880) on the genuinely held-out 24-student test set. Gradient Boosting looked better on CV alone (overfit the tuning pool) but fell short on held-out data; the CNN's precision collapsed on held-out data despite decent recall. This CV→held-out reversal is itself documented in the report as the reason the held-out split matters.
   - 124+ tests passing at this point (check `py -3 -m pytest tests/ -v` for current count).
+- **Step 4 — SHAP explainability** (commit `0bbb778`). `scripts/training/explainability.py`: `train_production_model()` fits the winning LogReg config (C=0.1, oversample_ratio=0.5) as one model on all 120 students; `generate_student_explanation()` uses `shap.LinearExplainer` to produce per-student "why flagged" output (top risk/protective factors + a human-readable summary). Verified additivity holds on real rows; real example — a known at-risk student's explanation genuinely implicates `marks_deficit_margin`, `attendance_velocity`, `avg_days_late`. 130/130 tests passing at this point.
 - **Basic frontend scaffold** — `web/` (Next.js App Router + TypeScript + Tailwind). Not part of a numbered plan — scaffolded directly (bounded, no brainstorm/plan ceremony) so there's something to visually check against as each step below lands. Currently a single dashboard page (`web/app/page.tsx`) reading `web/data/synthetic_students.json` (a committed copy of the root `data/synthetic_students.json`) via `web/lib/dataset.ts`, showing cohort stats and a per-student risk table with MMCOE branding (`web/public/mmcoe-logo.png`).
   - Run it: `npm run dev` from `web/` (or `preview_start` with the `rebound-ai-web` entry in `.claude/launch.json`), or ask Claude to start it.
   - Refresh its data after regenerating the dataset: `npm run sync-data` from `web/` (copies `../data/synthetic_students.json` in).
@@ -79,7 +80,7 @@ Each step is its own brainstorm → spec-addition (if needed) → plan → subag
 
 ---
 
-### Step 4: SHAP explainability
+### Step 4: SHAP explainability — ✅ DONE
 
 **Goal:** per spec §5 point 9, every flagged student comes with *why* they were flagged (e.g. "attendance trend −32%, 3 late TW submissions"), using SHAP's model-agnostic explainers so it works regardless of which model type won Step 3's benchmark.
 
