@@ -28,7 +28,7 @@ def main() -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(dataset, f, indent=2)
 
-    at_risk_count = sum(1 for s in dataset if any(subj["at_risk"] for subj in s["subjects"]))
+    at_risk_count = sum(1 for s in dataset if any(subj["outcome"]["at_risk"] for subj in s["subjects"]))
     print(f"Wrote {len(dataset)} students to {output_path} ({at_risk_count} flagged at-risk).")
 
 

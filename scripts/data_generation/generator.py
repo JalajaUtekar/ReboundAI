@@ -134,7 +134,7 @@ def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) 
 
     if at_risk:
         marks_pct_series = declining_series(rng.uniform(65, 85), rng.uniform(20, 38), num_marks_points, 4.0, rng)
-        attendance_series = declining_series(rng.uniform(80, 95), rng.uniform(55, 72), NUM_WEEKS, 2.5, rng)
+        attendance_series = declining_series(rng.uniform(80, 95), rng.uniform(60, 74), NUM_WEEKS, 2.5, rng)
         lateness_series = declining_series(rng.uniform(0, 1), rng.uniform(3, 7), len(SUBMISSION_WEEKS), 1.0, rng)
     else:
         if rng.random() < 0.35:
@@ -172,7 +172,9 @@ def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) 
 
     th_score = round(sum(ut["score"] for ut in unit_tests), 1)
     pr_tw_score = round(sum(s["score"] for s in submissions), 2)
-    final_attendance_pct = attendance_weeks[-1]["attendance_pct"]
+    final_attendance_pct = round(
+        sum(w["attendance_pct"] for w in attendance_weeks) / len(attendance_weeks), 1
+    )
 
     if at_risk:
         ete_pct = rng.uniform(15, 38)
@@ -193,10 +195,12 @@ def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) 
         "pr_tw_component": pr_tw_key,
         "th_score": th_score,
         "pr_tw_score": pr_tw_score,
-        "ete_score": ete_score,
-        "aggregate_pct": aggregate_pct,
-        "final_attendance_pct": final_attendance_pct,
-        "at_risk": computed_at_risk,
+        "outcome": {
+            "ete_score": ete_score,
+            "aggregate_pct": aggregate_pct,
+            "final_attendance_pct": final_attendance_pct,
+            "at_risk": computed_at_risk,
+        },
     }
 
 
@@ -214,7 +218,7 @@ def generate_subject_instance_with_target_label(
     """
     for _ in range(max_attempts):
         instance = generate_subject_instance(subject, at_risk=target_at_risk, rng=rng)
-        if instance["at_risk"] == target_at_risk:
+        if instance["outcome"]["at_risk"] == target_at_risk:
             return instance
     raise RuntimeError(
         f"Could not generate a '{subject['subject_slug']}' instance with at_risk={target_at_risk} "

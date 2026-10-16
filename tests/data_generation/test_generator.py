@@ -127,28 +127,29 @@ def test_generate_subject_instance_component_scores_are_within_max_marks():
     instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=rng)
     assert 0 <= instance["th_score"] <= 40
     assert 0 <= instance["pr_tw_score"] <= 25
-    assert 0 <= instance["ete_score"] <= 60
+    assert 0 <= instance["outcome"]["ete_score"] <= 60
 
 
 def test_generate_subject_instance_at_risk_label_matches_computed_thresholds():
     rng = random.Random(4)
     instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=True, rng=rng)
-    expected = (instance["final_attendance_pct"] < 75.0) or (instance["aggregate_pct"] < 40.0)
-    assert instance["at_risk"] == expected
+    outcome = instance["outcome"]
+    expected = (outcome["final_attendance_pct"] < 75.0) or (outcome["aggregate_pct"] < 40.0)
+    assert outcome["at_risk"] == expected
 
 
 def test_generate_subject_instance_with_target_label_guarantees_at_risk_true():
     rng = random.Random(123)
     for _ in range(10):
         instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, True, rng)
-        assert instance["at_risk"] is True
+        assert instance["outcome"]["at_risk"] is True
 
 
 def test_generate_subject_instance_with_target_label_guarantees_at_risk_false():
     rng = random.Random(321)
     for _ in range(10):
         instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, False, rng)
-        assert instance["at_risk"] is False
+        assert instance["outcome"]["at_risk"] is False
 
 
 def test_at_risk_instance_does_not_start_already_failing():
@@ -163,19 +164,22 @@ def test_at_risk_instance_does_not_start_already_failing():
 
 
 def test_at_risk_label_is_computed_not_echoed_from_input_flag():
-    # Seed 28 with at_risk=False computes to at_risk=True (attendance 80.3, aggregate 37.8).
+    # Seed 28 with at_risk=False computes to at_risk=True via the aggregate threshold,
+    # with attendance remaining above the 75% cutoff.
     # If the return value ever echoed the input flag, this would fail.
     instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=random.Random(28))
-    assert instance["final_attendance_pct"] >= 75.0
-    assert instance["aggregate_pct"] < 40.0
-    assert instance["at_risk"] is True
+    outcome = instance["outcome"]
+    assert outcome["final_attendance_pct"] >= 75.0
+    assert outcome["aggregate_pct"] < 40.0
+    assert outcome["at_risk"] is True
 
 
 def test_aggregate_pct_matches_component_formula():
     rng = random.Random(4)
     instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=rng)
-    expected = round((instance["th_score"] + instance["ete_score"] + instance["pr_tw_score"]) / 125 * 100, 1)
-    assert instance["aggregate_pct"] == expected
+    outcome = instance["outcome"]
+    expected = round((instance["th_score"] + outcome["ete_score"] + instance["pr_tw_score"]) / 125 * 100, 1)
+    assert outcome["aggregate_pct"] == expected
 
 
 from scripts.data_generation.generator import generate_dataset
@@ -195,7 +199,7 @@ def test_generate_dataset_is_reproducible_for_a_fixed_seed():
 
 def test_generate_dataset_at_risk_student_rate_is_within_5_to_15_percent():
     dataset = generate_dataset(num_students=75, seed=42)
-    at_risk_students = [s for s in dataset if any(subj["at_risk"] for subj in s["subjects"])]
+    at_risk_students = [s for s in dataset if any(subj["outcome"]["at_risk"] for subj in s["subjects"])]
     rate = len(at_risk_students) / len(dataset)
     assert 0.05 <= rate <= 0.15
 
@@ -203,5 +207,22 @@ def test_generate_dataset_at_risk_student_rate_is_within_5_to_15_percent():
 def test_generate_dataset_at_risk_students_have_exactly_one_flagged_subject():
     dataset = generate_dataset(num_students=75, seed=42)
     for student in dataset:
-        flagged = [subj for subj in student["subjects"] if subj["at_risk"]]
+        flagged = [subj for subj in student["subjects"] if subj["outcome"]["at_risk"]]
         assert len(flagged) in (0, 1), student["student_id"]
+
+
+from scripts.data_generation.generator import CHECKPOINTS_IN_TIME_ORDER
+
+
+def test_checkpoints_are_in_exact_chronological_order():
+    # Regression test for the Task-5 chronological-ordering fix: direct, literal
+    # assertion on the structure itself, not an indirect behavioral check.
+    assert CHECKPOINTS_IN_TIME_ORDER == [
+        ("submission", 0),  # week 2
+        ("submission", 1),  # week 4
+        ("submission", 2),  # week 6
+        ("unit_test", 0),   # week 6 (submissions break ties before unit tests)
+        ("submission", 3),  # week 8
+        ("submission", 4),  # week 10
+        ("unit_test", 1),   # week 12
+    ]
