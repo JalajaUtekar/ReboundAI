@@ -1,5 +1,6 @@
 """Synthetic dataset generator for Rebound AI's ScholarTrack training data."""
 
+import math
 import random
 from typing import Dict, List
 
@@ -63,3 +64,17 @@ def assign_subjects(rng: random.Random) -> List[Dict]:
         )
 
     return chosen
+
+
+def select_at_risk_students(
+    student_ids: List[str],
+    rng: random.Random,
+    min_rate: float = 0.05,
+    max_rate: float = 0.15,
+) -> List[str]:
+    """Picks a 5-15% (by default) minority of students to be genuinely falling behind."""
+    n = len(student_ids)
+    min_count = max(1, math.ceil(min_rate * n))
+    max_count = max(min_count, math.floor(max_rate * n))
+    count = rng.randint(min_count, max_count)
+    return rng.sample(student_ids, count)

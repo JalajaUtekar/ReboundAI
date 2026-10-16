@@ -43,3 +43,28 @@ def test_assign_subjects_choice_slots_come_from_their_pools():
     assert mdm_slug in {slugify(n) for n in MDM_OPTIONS}
     assert oel_slug in {slugify(n) for n in OEL_OPTIONS}
     assert elective_slug in {slugify(n) for n in ELECTIVE_OPTIONS}
+
+
+from scripts.data_generation.generator import select_at_risk_students
+
+
+def test_select_at_risk_students_count_within_5_to_15_percent():
+    student_ids = [f"S{i:03d}" for i in range(1, 76)]
+    rng = random.Random(3)
+    at_risk = select_at_risk_students(student_ids, rng)
+    assert 4 <= len(at_risk) <= 11  # ceil(5% of 75) .. floor(15% of 75)
+
+
+def test_select_at_risk_students_returns_subset_with_no_duplicates():
+    student_ids = [f"S{i:03d}" for i in range(1, 76)]
+    rng = random.Random(9)
+    at_risk = select_at_risk_students(student_ids, rng)
+    assert len(at_risk) == len(set(at_risk))
+    assert set(at_risk).issubset(set(student_ids))
+
+
+def test_select_at_risk_students_respects_custom_rate_bounds():
+    student_ids = [f"S{i:03d}" for i in range(1, 101)]
+    rng = random.Random(11)
+    at_risk = select_at_risk_students(student_ids, rng, min_rate=0.10, max_rate=0.10)
+    assert len(at_risk) == 10
