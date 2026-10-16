@@ -6,6 +6,20 @@ Source of truth for all design decisions: [docs/superpowers/specs/2026-10-16-reb
 
 ---
 
+## Target goal
+
+A deployed, demoable Rebound AI for the CE24MDM305 Foundations of GenAI mini-hackathon, with **ScholarTrack as the primary problem statement and Lecture2Revision as its gated assistant** (spec §1):
+
+- **ScholarTrack actually forecasts, not diagnoses.** A trained CNN (Conv1D, matching the course's CNN unit) predicts a TY Computer Engineering student's per-subject risk from in-term signals only — marks, attendance, submission timeliness — never from the held-out end-term exam. Evaluated against Logistic Regression and Gradient Boosting baselines under proper cross-validation (not a single split, given the small N), with class imbalance handled per the mentor's checklist (class weights, train-fold-only oversampling, a recall-targeted cutoff) and each flagged student explainable via SHAP ("why was this student flagged").
+- **Lecture2Revision activates only for a flagged student-subject** — real PDF upload, grounded revision notes/flashcards/quizzes (offline-extractive by default, not a bare LLM call), SM-2 spaced repetition, and the existing LSTM forecaster boosting that subject's priority in the adaptive plan.
+- **Registration and data are real for the TY CE cohort** (spec §2-§3): branch/year gating, the actual DSML/CN/SPOS + MDM/OEL/Elective subject structure and grading weights, backed by Supabase (Postgres + Auth, Google OAuth documented for later).
+- **One deployable app on Vercel** — Next.js frontend + Python serverless API, MMCOE-branded, not a loose collection of scripts and notebooks.
+- **Honest throughout development**: every intermediate build (like the current frontend) shows real data and is honestly labeled as such — never a mocked demo pretending to be further along than it is.
+
+No fixed deadline has been given — treat "done" as the state above, not a specific date.
+
+---
+
 ## Done
 
 - **Spec** — `docs/superpowers/specs/2026-10-16-rebound-ai-design.md`. Full design: registration flow, subject/grading structure, ScholarTrack's leakage-free forecasting design, the mentor's 11-point ML methodology, Lecture2Revision's gated-assistant role, the Next.js + Python-on-Vercel + Supabase stack.
