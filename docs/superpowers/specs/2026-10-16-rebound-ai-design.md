@@ -21,11 +21,13 @@ Lecture2Revision is *not* a parallel feature sitting next to it. It only activat
 
 This is a real app for MMCOE students, so registration has to gate correctly even though only one cohort is live at launch.
 
-**Step 1 — Branch selection.** Options: AI&DS, CE, IT, E&TC, ME, EE. Only **CE (Computer Engineering)** is selectable; the other five render disabled/greyed with a "coming soon" state. (Enabling them later is just flipping a flag — no schema change needed, the `branch` column already accepts any of the six values.)
+**Step 1 — Basic details.** Name, PRN, Email, Photograph.
 
-**Step 2 — Academic year selection.** Options: FY, SY, TY, BE. Only **TY (Third Year)** is selectable; same disabled treatment for the rest.
+**Step 2 — Branch selection.** Options: AI&DS, CE, IT, E&TC, ME, EE. Only **CE (Computer Engineering)** is selectable; the other five render disabled/greyed with a "coming soon" state. (Enabling them later is just flipping a flag — no schema change needed, the `branch` column already accepts any of the six values.)
 
-**Step 3 — Subject setup (TY CE only, for now).** Three subjects are fixed and pre-entered for every TY CE student: **DSML, CN, SPOS**. Three more are chosen via dropdown, one each:
+**Step 3 — Academic year selection.** Options: FY, SY, TY, BE. Only **TY (Third Year)** is selectable; same disabled treatment for the rest.
+
+**Step 4 — Subject setup (TY CE only, for now).** Three subjects are fixed and pre-entered for every TY CE student: **DSML, CN, SPOS**. Three more are chosen via dropdown, one each:
 
 - **MDM** (Multidisciplinary Minor): GenAI, Privacy and Security Engineering, Robotics and Automation, Electric Vehicle Technology, Sustainable and Smart Systems, Embedded Systems
 - **OEL** (Open Elective): Practical Japanese Communication, Workplace Ethics in German Language, Product and Brand Management, Strategic Management, Operations and Supply Chain Management, Organizational Behaviour
@@ -105,7 +107,7 @@ Carried over from Lecture2Revision almost unmodified:
 - **Frontend**: Next.js (App Router) + TypeScript + Tailwind — UI only, calls the backend over HTTP. MMCOE branding (`assets/mmcoe-logo.png`, "Department of Computer Engineering") on login/dashboard.
 - **Backend**: Vercel Python Serverless Functions (`/api/*.py`) — PyMuPDF, the extractive generator, SM-2, the LSTM, and the new ScholarTrack NumPy-served CNN all run here, carried over from the two source projects with minimal changes (Section 5 and 6).
 - **Database**: Supabase Postgres. Same entities as Lecture2Revision's existing SQLite schema, extended with ScholarTrack's academic structure:
-  - `students` (branch, academic_year, name — gated to CE/TY for now)
+  - `students` (name, prn, email, photo_url, branch, academic_year — gated to CE/TY for now)
   - `student_subjects` (student_id, subject_slug, chosen_variant — e.g. which MDM/OEL/Elective)
   - `assessment_checkpoints` (student_id, subject_slug, checkpoint_type [unit_test/submission/attendance_week], value, due_date, submitted_date)
   - `risk_predictions` (student_id, subject_slug, risk_probability, shap_explanation, predicted_at)
