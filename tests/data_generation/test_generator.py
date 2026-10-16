@@ -152,8 +152,27 @@ def test_generate_subject_instance_with_target_label_guarantees_at_risk_false():
 
 
 def test_at_risk_instance_does_not_start_already_failing():
-    # The decline must be visible over the term, not already broken at checkpoint 1.
+    # The decline must be visible over the term, not already broken at the first
+    # chronological checkpoint, which is the week-2 submission.
     rng = random.Random(123)
     instance = generate_subject_instance_with_target_label(_SAMPLE_SUBJECT, True, rng)
-    first_unit_test_pct = instance["unit_tests"][0]["score"] / instance["unit_tests"][0]["max_marks"] * 100
-    assert first_unit_test_pct > 45.0
+    first_checkpoint = instance["submissions"][0]
+    assert first_checkpoint["due_day"] == 14  # week 2
+    first_pct = first_checkpoint["score"] / first_checkpoint["max_marks"] * 100
+    assert first_pct > 45.0
+
+
+def test_at_risk_label_is_computed_not_echoed_from_input_flag():
+    # Seed 28 with at_risk=False computes to at_risk=True (attendance 80.3, aggregate 37.8).
+    # If the return value ever echoed the input flag, this would fail.
+    instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=random.Random(28))
+    assert instance["final_attendance_pct"] >= 75.0
+    assert instance["aggregate_pct"] < 40.0
+    assert instance["at_risk"] is True
+
+
+def test_aggregate_pct_matches_component_formula():
+    rng = random.Random(4)
+    instance = generate_subject_instance(_SAMPLE_SUBJECT, at_risk=False, rng=rng)
+    expected = round((instance["th_score"] + instance["ete_score"] + instance["pr_tw_score"]) / 125 * 100, 1)
+    assert instance["aggregate_pct"] == expected

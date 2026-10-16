@@ -106,6 +106,21 @@ NUM_WEEKS = 14
 UNIT_TEST_WEEKS = [6, 12]
 SUBMISSION_WEEKS = [2, 4, 6, 8, 10]
 
+# The 7 assessment checkpoints in chronological order: ("submission", i) or ("unit_test", i).
+# On a tie in week, submissions come before unit tests (so week 6 submission precedes week 6 UT1).
+_TYPE_RANK = {"submission": 0, "unit_test": 1}
+
+
+def _checkpoint_week(checkpoint):
+    kind, idx = checkpoint
+    return SUBMISSION_WEEKS[idx] if kind == "submission" else UNIT_TEST_WEEKS[idx]
+
+
+CHECKPOINTS_IN_TIME_ORDER = sorted(
+    [("submission", i) for i in range(len(SUBMISSION_WEEKS))] + [("unit_test", i) for i in range(2)],
+    key=lambda cp: (_checkpoint_week(cp), _TYPE_RANK[cp[0]]),
+)
+
 
 def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) -> Dict:
     """Generates one student's full-term record for one subject, and computes its risk label.
@@ -131,8 +146,10 @@ def generate_subject_instance(subject: Dict, at_risk: bool, rng: random.Random) 
         attendance_series = stable_series(rng.uniform(78, 97), NUM_WEEKS, 2.0, rng)
         lateness_series = stable_series(rng.uniform(0, 1.5), len(SUBMISSION_WEEKS), 0.5, rng)
 
-    unit_test_pcts = marks_pct_series[:2]
-    submission_pcts = marks_pct_series[2:]
+    # Assign the declining series in chronological order so the trend is monotone over time.
+    pct_by_checkpoint = {cp: marks_pct_series[k] for k, cp in enumerate(CHECKPOINTS_IN_TIME_ORDER)}
+    unit_test_pcts = [pct_by_checkpoint[("unit_test", i)] for i in range(2)]
+    submission_pcts = [pct_by_checkpoint[("submission", i)] for i in range(len(SUBMISSION_WEEKS))]
 
     unit_tests = [
         {"index": i + 1, "week": UNIT_TEST_WEEKS[i], "max_marks": 20.0, "score": round(unit_test_pcts[i] / 100 * 20, 1)}
