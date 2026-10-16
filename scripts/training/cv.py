@@ -48,6 +48,49 @@ _JITTER_STD_FRACTION = 0.03
 _JITTER_STD_FLOOR = 0.5
 
 
+def held_out_test_split(
+    student_ids: List[str],
+    student_at_risk: Dict[str, bool],
+    test_size: float = 0.2,
+    seed: int = 7,
+) -> Tuple[List[str], List[str]]:
+    """Carve off a final held-out test set, stratified by at-risk status.
+
+    This is a SEPARATE, one-time split from `grouped_student_kfold`'s CV
+    folds. The returned `test_ids` must never be used for model selection,
+    hyperparameter tuning, or threshold tuning - all of that happens only
+    within `cv_pool_ids` (via `grouped_student_kfold` on the pool). The
+    test set is evaluated exactly once, at the very end, on whichever model
+    configuration CV selected as the winner - that is what makes its
+    reported metrics an honest estimate rather than a CV-tuned one.
+
+    Uses a different default seed (7) from `grouped_student_kfold`'s
+    default (42) so the two splits aren't trivially coupled if both are
+    called with their defaults.
+    """
+    if not (0.0 < test_size < 1.0):
+        raise ValueError("test_size must be between 0 and 1 (exclusive)")
+
+    unique_ids = list(dict.fromkeys(student_ids))
+    at_risk_ids = [sid for sid in unique_ids if student_at_risk.get(sid, False)]
+    not_at_risk_ids = [sid for sid in unique_ids if not student_at_risk.get(sid, False)]
+
+    rng = random.Random(seed)
+    at_risk_shuffled = at_risk_ids[:]
+    not_at_risk_shuffled = not_at_risk_ids[:]
+    rng.shuffle(at_risk_shuffled)
+    rng.shuffle(not_at_risk_shuffled)
+
+    n_at_risk_test = max(1, round(len(at_risk_shuffled) * test_size)) if at_risk_shuffled else 0
+    n_not_at_risk_test = round(len(not_at_risk_shuffled) * test_size)
+
+    test_ids = at_risk_shuffled[:n_at_risk_test] + not_at_risk_shuffled[:n_not_at_risk_test]
+    test_id_set = set(test_ids)
+    cv_pool_ids = [sid for sid in unique_ids if sid not in test_id_set]
+
+    return cv_pool_ids, test_ids
+
+
 def grouped_student_kfold(
     student_ids: List[str],
     student_at_risk: Dict[str, bool],

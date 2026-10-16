@@ -10,6 +10,7 @@ import pytest
 from scripts.training.cv import (
     compute_class_weights,
     grouped_student_kfold,
+    held_out_test_split,
     oversample_training_rows,
 )
 
@@ -243,3 +244,52 @@ class TestComputeClassWeights:
     def test_raises_when_missing_a_class(self):
         with pytest.raises(ValueError):
             compute_class_weights([False, False, False])
+
+
+def _load_real_student_ids_and_labels():
+    with open(DATA_PATH, encoding="utf-8") as f:
+        rows = json.load(f)
+    student_ids = sorted({r["student_id"] for r in rows})
+    student_at_risk = {}
+    for r in rows:
+        student_at_risk[r["student_id"]] = student_at_risk.get(r["student_id"], False) or r["at_risk"]
+    return student_ids, student_at_risk
+
+
+class TestHeldOutTestSplit:
+    def test_pool_and_test_are_disjoint_and_cover_all_students(self):
+        student_ids, student_at_risk = _load_real_student_ids_and_labels()
+        pool, test = held_out_test_split(student_ids, student_at_risk, test_size=0.2, seed=7)
+        assert set(pool).isdisjoint(set(test))
+        assert set(pool) | set(test) == set(student_ids)
+
+    def test_test_size_roughly_respected(self):
+        student_ids, student_at_risk = _load_real_student_ids_and_labels()
+        pool, test = held_out_test_split(student_ids, student_at_risk, test_size=0.2, seed=7)
+        assert 15 <= len(test) <= 30
+        assert len(pool) + len(test) == len(student_ids)
+
+    def test_test_set_contains_at_least_one_at_risk_student(self):
+        student_ids, student_at_risk = _load_real_student_ids_and_labels()
+        _, test = held_out_test_split(student_ids, student_at_risk, test_size=0.2, seed=7)
+        assert any(student_at_risk[s] for s in test)
+
+    def test_pool_retains_enough_at_risk_students_for_5_fold_cv(self):
+        student_ids, student_at_risk = _load_real_student_ids_and_labels()
+        pool, _ = held_out_test_split(student_ids, student_at_risk, test_size=0.2, seed=7)
+        pool_at_risk_count = sum(1 for s in pool if student_at_risk[s])
+        assert pool_at_risk_count >= 5
+
+    def test_deterministic_given_seed(self):
+        student_ids, student_at_risk = _load_real_student_ids_and_labels()
+        pool1, test1 = held_out_test_split(student_ids, student_at_risk, seed=7)
+        pool2, test2 = held_out_test_split(student_ids, student_at_risk, seed=7)
+        assert pool1 == pool2
+        assert test1 == test2
+
+    def test_invalid_test_size_raises(self):
+        student_ids, student_at_risk = _load_real_student_ids_and_labels()
+        with pytest.raises(ValueError):
+            held_out_test_split(student_ids, student_at_risk, test_size=0.0)
+        with pytest.raises(ValueError):
+            held_out_test_split(student_ids, student_at_risk, test_size=1.0)
