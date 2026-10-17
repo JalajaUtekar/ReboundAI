@@ -2,5 +2,6 @@
   "buildCommand": "cd web && npm run build",
   "installCommand": "cd web && npm install",
   "outputDirectory": "web/.next",
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "devCommand": "cd web && npm run dev -- --port $PORT"
 }
