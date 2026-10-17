@@ -60,6 +60,58 @@ def _env() -> Dict[str, str]:
     return {**_load_dotenv(), **os.environ}
 
 
+def verify_jwt_only(authorization_header: Optional[str]) -> str:
+    """Verifies `authorization_header` against Supabase Auth (the same
+    `GET {SUPABASE_URL}/auth/v1/user` call `get_current_profile` makes) and
+    returns just the caller's `auth.users.id`, WITHOUT requiring a matching
+    `profiles` row to already exist.
+
+    This is the registration-time variant: a brand-new user who just
+    signed up/signed in via Supabase Auth has no `profiles` row yet (that's
+    exactly what `POST /api/register` is for), so `get_current_profile`
+    would raise `AuthError` for them. Endpoints that create a user's first
+    `profiles` row should use this instead; every other endpoint should
+    keep using `get_current_profile`, whose signature/behavior is
+    unchanged by this addition.
+
+    Raises `AuthError` for a missing/invalid/expired token, same as
+    `get_current_profile`.
+    """
+    if not authorization_header:
+        raise AuthError("Missing Authorization header")
+
+    env = _env()
+    supabase_url = env.get("SUPABASE_URL")
+    anon_key = env.get("SUPABASE_ANON_KEY")
+    if not supabase_url or not anon_key:
+        raise AuthError(
+            "Server misconfigured: SUPABASE_URL/SUPABASE_ANON_KEY not set"
+        )
+
+    import requests
+
+    resp = requests.get(
+        f"{supabase_url}/auth/v1/user",
+        headers={"Authorization": authorization_header, "apikey": anon_key},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise AuthError(
+            f"Invalid or expired session (GET /auth/v1/user returned {resp.status_code})"
+        )
+
+    try:
+        auth_user = resp.json()
+    except ValueError as exc:
+        raise AuthError("Supabase auth response was not valid JSON") from exc
+
+    user_id = auth_user.get("id")
+    if not user_id:
+        raise AuthError("Supabase auth response did not include a user id")
+
+    return user_id
+
+
 def get_current_profile(authorization_header: Optional[str]) -> dict:
     """Verifies `authorization_header` (e.g. `"Bearer eyJ..."`) against
     Supabase Auth and returns the caller's profile.
