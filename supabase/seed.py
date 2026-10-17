@@ -80,6 +80,54 @@ def _load_dotenv() -> Dict[str, str]:
     return values
 
 
+def _ensure_auth_user(email: str, supabase_url: str, service_role_key: str) -> str:
+    """Creates (or finds, if already present) a Supabase Auth user for `email`.
+
+    Returns the real server-assigned UUID -- GoTrue's admin API does not let
+    you choose a user's id, so this is the source of truth for `profiles.id`
+    when auth users are involved, NOT the deterministic uuid5 used elsewhere
+    in this script. Idempotent: re-running against an email that already has
+    an auth user looks it up instead of erroring.
+    """
+    import requests
+
+    headers = {
+        "Authorization": f"Bearer {service_role_key}",
+        "apikey": service_role_key,
+        "Content-Type": "application/json",
+    }
+    create_resp = requests.post(
+        f"{supabase_url}/auth/v1/admin/users",
+        headers=headers,
+        json={
+            "email": email,
+            "password": str(uuid.uuid4()),
+            "email_confirm": True,
+        },
+        timeout=20,
+    )
+    if create_resp.status_code in (200, 201):
+        return create_resp.json()["id"]
+
+    # Already exists (422/400 "already been registered") -- look it up instead.
+    list_resp = requests.get(
+        f"{supabase_url}/auth/v1/admin/users",
+        headers=headers,
+        params={"per_page": 1000},
+        timeout=20,
+    )
+    list_resp.raise_for_status()
+    for user in list_resp.json().get("users", []):
+        if user.get("email", "").lower() == email.lower():
+            return user["id"]
+
+    raise RuntimeError(
+        f"Could not create or find an auth user for {email!r}: "
+        f"create returned {create_resp.status_code} {create_resp.text[:200]!r}, "
+        "and no matching user was found in the admin user list."
+    )
+
+
 def _subject_type(subject_slug: str) -> str:
     fixed = {"DSML", "CN", "SPOS"}
     if subject_slug in fixed:
@@ -98,15 +146,27 @@ def _subject_type(subject_slug: str) -> str:
     raise ValueError(f"Unrecognized subject_slug {subject_slug!r}")
 
 
-def build_rows(students: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """Builds the profiles/students/student_subjects/assessment_checkpoints rows."""
+def build_rows(
+    students: List[Dict[str, Any]],
+    profile_id_by_email: Optional[Dict[str, str]] = None,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Builds the profiles/students/student_subjects/assessment_checkpoints rows.
+
+    `profile_id_by_email`, if given, overrides the deterministic uuid5
+    profile id with the real Supabase Auth user id for that student's email
+    (see `_ensure_auth_user`) -- required when `profiles.id` has a live FK
+    to `auth.users.id`, since GoTrue assigns that id, not us.
+    """
     profiles: List[Dict[str, Any]] = []
     student_rows: List[Dict[str, Any]] = []
     subject_rows: List[Dict[str, Any]] = []
     checkpoint_rows: List[Dict[str, Any]] = []
 
     for student in students:
-        profile_id = _uuid5("profile", student["prn"])
+        if profile_id_by_email is not None:
+            profile_id = profile_id_by_email[student["email"]]
+        else:
+            profile_id = _uuid5("profile", student["prn"])
         student_id = _uuid5("student", student["prn"])
 
         profiles.append(
@@ -295,6 +355,17 @@ _TABLE_ORDER = ["profiles", "students", "student_subjects", "assessment_checkpoi
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="Build rows and print counts, write nothing.")
+    parser.add_argument(
+        "--create-auth-users",
+        action="store_true",
+        help=(
+            "Create (or find, if already present) a real Supabase Auth user per "
+            "student via the Admin API, using SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, "
+            "and use its real id for profiles.id instead of the deterministic uuid5. "
+            "Required the first time this is run against a live Supabase project, "
+            "since profiles.id has a live FK to auth.users.id."
+        ),
+    )
     args = parser.parse_args()
 
     students_path = REPO_ROOT / "data" / "synthetic_students.json"
@@ -303,7 +374,28 @@ def main() -> int:
     students = json.loads(students_path.read_text(encoding="utf-8"))
     training_rows = json.loads(training_rows_path.read_text(encoding="utf-8"))
 
-    table_rows = build_rows(students)
+    profile_id_by_email: Optional[Dict[str, str]] = None
+    if args.create_auth_users:
+        env_for_auth = {**_load_dotenv(), **os.environ}
+        supabase_url = env_for_auth.get("SUPABASE_URL")
+        service_role_key = env_for_auth.get("SUPABASE_SERVICE_ROLE_KEY")
+        if not supabase_url or not service_role_key:
+            print(
+                "--create-auth-users requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+                "in .env.",
+                file=sys.stderr,
+            )
+            return 1
+        profile_id_by_email = {}
+        print(f"Creating/finding {len(students)} Supabase Auth users...")
+        for i, student in enumerate(students, 1):
+            profile_id_by_email[student["email"]] = _ensure_auth_user(
+                student["email"], supabase_url, service_role_key
+            )
+            if i % 20 == 0 or i == len(students):
+                print(f"  {i}/{len(students)} auth users ready")
+
+    table_rows = build_rows(students, profile_id_by_email=profile_id_by_email)
     table_rows["risk_predictions"] = build_risk_prediction_rows(students, training_rows)
 
     counts = {table: len(rows) for table, rows in table_rows.items()}
@@ -331,18 +423,48 @@ def main() -> int:
 
     import psycopg2
 
-    conn = psycopg2.connect(database_url)
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                for table in _TABLE_ORDER:
-                    rows = table_rows[table]
-                    template = _UPSERT_TEMPLATES[table]
-                    for row in rows:
+    # Plain per-row execute(). A single real row measured 0.14s with no
+    # timeout set, so the occasional "statement timeout"/"connection closed"
+    # seen in earlier runs are transient network blips against Supabase's
+    # direct connection, not a fundamental slowness problem. Every insert
+    # here is idempotent (ON CONFLICT ... DO UPDATE on a deterministic id),
+    # so the safe, pragmatic fix is retry-with-reconnect per row rather than
+    # chasing the exact transient cause further.
+    MAX_ROW_ATTEMPTS = 5
+
+    def _connect():
+        c = psycopg2.connect(database_url)
+        c.autocommit = True
+        return c, c.cursor()
+
+    for table in _TABLE_ORDER:
+        rows = table_rows[table]
+        template = _UPSERT_TEMPLATES[table]
+
+        conn, cur = _connect()
+        try:
+            for i, row in enumerate(rows, 1):
+                for attempt in range(1, MAX_ROW_ATTEMPTS + 1):
+                    try:
                         cur.execute(template, row)
-                    print(f"Upserted {len(rows)} rows into {table}")
-    finally:
-        conn.close()
+                        break
+                    except (psycopg2.OperationalError, psycopg2.errors.QueryCanceled) as e:
+                        if attempt == MAX_ROW_ATTEMPTS:
+                            raise
+                        print(
+                            f"  retry {attempt}/{MAX_ROW_ATTEMPTS} on {table} row {i}/{len(rows)} "
+                            f"after {type(e).__name__}"
+                        )
+                        try:
+                            cur.close()
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn, cur = _connect()
+            print(f"Upserted {len(rows)} rows into {table}")
+        finally:
+            cur.close()
+            conn.close()
 
     print("Seed complete.")
     return 0
