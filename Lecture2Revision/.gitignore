@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Environment files
+.env
+
+# Application databases & data
+data/*.db
+data/*.sqlite
+uploads/*
+!uploads/.gitkeep
+models/*.keras
+models/*.h5
+models/*.pkl
+!models/.gitkeep
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# VS Code / IDE
+.vscode/
+.idea/
+*.swp

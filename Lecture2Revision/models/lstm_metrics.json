@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "engine": "Vectorized NumPy LSTM (Recurrent Gate Engine)",
+  "trained_at": "2026-10-16T22:06:52.680958",
+  "total_samples": 55,
+  "train_samples": 41,
+  "test_samples": 14,
+  "lstm_mae": 24.73,
+  "lstm_rmse": 26.06,
+  "baseline_mae": 3.58,
+  "baseline_rmse": 5.84,
+  "baseline_type": "Last-Observed Quiz Score (Persistence)",
+  "mae_improvement_pct": -591.1,
+  "epochs_run": 25
+}

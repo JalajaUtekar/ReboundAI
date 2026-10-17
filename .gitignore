@@ -6,3 +6,6 @@ __pycache__/
 !.env.example
 client_secret_*.json
 *.apps.googleusercontent.com.json
+
+.vercel
+.env*
